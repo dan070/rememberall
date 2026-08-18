@@ -1,0 +1,1341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Remember-all — Board wireframe</title>
+<style>
+  :root {
+    --paper: #f7f3ec;
+    --ink: #262220;
+    --ink-soft: rgba(38,34,32,0.5);
+    --ink-faint: #8a8175;
+    --grid-line: rgba(38,34,32,0.07);
+    --chrome-bg: #232019;
+    --chrome-fg: #f2ede2;
+    --chrome-border: #423c30;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink);
+    overflow: hidden;
+    background: #d8d2c3;
+  }
+
+  /* ---------- top bar ---------- */
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0; min-height: 56px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; gap: 10px; flex-wrap: wrap;
+    background: var(--chrome-bg);
+    color: var(--chrome-fg);
+    z-index: 50;
+    font-size: 14px;
+  }
+  #topbar .stackinfo { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
+  #topbar .title { font-weight: 700; letter-spacing: 0.02em; font-size: 15px; }
+  #topbar .paperno { color: #c9bfa8; font-size: 12.5px; }
+  #topbar .meta { color: #8f8672; font-size: 11.5px; width: 100%; }
+  #topbar .btns { display: flex; gap: 8px; }
+  #topbar button {
+    background: #2f2a21; color: var(--chrome-fg); border: 1px solid var(--chrome-border);
+    border-radius: 8px; padding: 8px 12px; font-size: 12.5px; cursor: pointer;
+  }
+  #topbar button:active { background: var(--chrome-border); }
+
+  /* ---------- read-only archive banner ---------- */
+  #readonlyBanner {
+    display: none;
+    position: fixed; top: 72px; left: 0; right: 0; z-index: 45;
+    align-items: center; justify-content: space-between;
+    background: #4a3a1f; color: #f7ecd2;
+    padding: 8px 14px; font-size: 12.5px;
+  }
+  #readonlyBanner button {
+    background: #f7ecd2; color: #4a3a1f; border: none; border-radius: 8px;
+    padding: 6px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+
+  /* ---------- viewport / canvas ---------- */
+  #viewport {
+    position: absolute; top: 72px; left: 0; right: 0; bottom: 0;
+    overflow: hidden;
+    touch-action: none;
+    cursor: grab;
+  }
+  #viewport.has-banner { top: 108px; }
+  #canvas.readonly { filter: saturate(0.75); }
+  #viewport.panning { cursor: grabbing; }
+  #canvas {
+    position: absolute; top: 0; left: 0;
+    width: 1600px; height: 2000px;
+    background:
+      linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 100% 40px,
+      var(--paper);
+    box-shadow: 0 0 40px rgba(0,0,0,0.25);
+    transform-origin: 0 0;
+  }
+  #canvas::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle at 1px 1px, rgba(38,34,32,0.05) 1px, transparent 1px);
+    background-size: 24px 24px;
+    pointer-events: none;
+  }
+  svg#lines { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+  svg#lines line { stroke: var(--ink); stroke-opacity: 0.28; stroke-width: 1.6; }
+  svg#lines line.done-line { stroke-opacity: 0.12; }
+
+  /* ---------- bubbles ---------- */
+  /* Each bubble's rotation / corner radii / ink-alpha come from a hash of
+     its own id (see fingerprint()), fixed forever at creation — no two
+     look quite alike, same as a different hand-drawn circle each time. */
+  .bubble {
+    position: absolute;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center;
+    padding: 8px 10px;
+    font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive, sans-serif;
+    line-height: 1.2;
+    cursor: pointer;
+    user-select: none;
+    transition: opacity 0.25s;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  .bubble .txt {
+    position: relative; z-index: 1;
+    overflow-wrap: break-word; word-break: break-word; hyphens: auto;
+    line-height: 1.08; max-width: 100%; max-height: 100%; overflow: hidden;
+  }
+  .bubble .theme-date {
+    font-weight: 700;
+    margin-top: 3px; position: relative; z-index: 1;
+    font-size: 0.82em;
+  }
+  .bubble.theme { font-weight: 700; flex-direction: column; border-style: solid; }
+  .bubble.item { font-weight: 500; border-style: solid; }
+
+  .bubble .date-tag {
+    position: absolute; top: -10px; right: -10px;
+    background: var(--paper); color: var(--ink);
+    border: 1.5px solid var(--ink);
+    font-size: 10px; font-weight: 700;
+    border-radius: 4px; padding: 2px 5px;
+    z-index: 2;
+    font-family: -apple-system, sans-serif;
+  }
+  .bubble.state-done .txt { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+  .bubble.state-done { opacity: 0.5; }
+  .bubble.state-cancelled { opacity: 0.65; }
+
+  /* Brief confirmation for a just-created bubble — the pen-lift moment on
+     paper where your eyes are already on the spot; this just says "yes,
+     right there" without moving the camera under you. Plays once. */
+  @keyframes bubble-pulse-in {
+    0%   { box-shadow: 0 0 0 0 rgba(59,110,165,0.55); }
+    40%  { box-shadow: 0 0 0 10px rgba(59,110,165,0.22); }
+    100% { box-shadow: 0 0 0 0 rgba(59,110,165,0); }
+  }
+  .bubble.pulse-in { animation: bubble-pulse-in 0.9s ease-out 1; }
+  .bubble .x-mark { position: absolute; inset: 0; pointer-events: none; }
+  .bubble .x-mark svg { width: 100%; height: 100%; }
+  .bubble .x-mark line { stroke: var(--ink); stroke-width: 2.4; stroke-opacity: 0.75; }
+
+  .theme-add-btn {
+    position: absolute; bottom: -9px; right: -9px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--ink); color: var(--paper);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; font-family: -apple-system, sans-serif;
+    z-index: 3; box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    cursor: pointer; line-height: 1;
+  }
+  .theme-add-btn:active { transform: scale(0.9); }
+
+  #quickAdd {
+    position: fixed; z-index: 90; display: none;
+    background: #fffdf8; border: 1px solid #ddd6c6; border-radius: 10px;
+    padding: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  }
+  #quickAdd input {
+    border: none; outline: none; font-size: 13.5px; padding: 6px 8px;
+    width: 190px; font-family: -apple-system, sans-serif;
+  }
+
+  /* ---------- fab / hint ---------- */
+  #hint {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: rgba(35,32,25,0.9); color: var(--chrome-fg);
+    padding: 8px 16px; border-radius: 20px; font-size: 12px;
+    z-index: 40; pointer-events: none;
+    opacity: 0.85;
+  }
+
+  /* ---------- zoom controls (desktop) ---------- */
+  #zoomctl {
+    position: fixed; right: 14px; bottom: 18px;
+    display: flex; flex-direction: column; gap: 6px;
+    z-index: 40;
+  }
+  #zoomctl button {
+    width: 36px; height: 36px; border-radius: 8px;
+    border: 1px solid var(--chrome-border); background: var(--chrome-bg); color: var(--chrome-fg);
+    font-size: 18px; cursor: pointer;
+  }
+
+  /* ---------- generic modal shell ---------- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+    display: none; align-items: flex-end; justify-content: center;
+    z-index: 100;
+  }
+  .modal-overlay.open { display: flex; }
+  @media (min-width: 700px) { .modal-overlay { align-items: center; } }
+  .modal-panel {
+    background: #fffdf8; width: 100%; max-width: 420px;
+    border-radius: 16px 16px 0 0;
+    padding: 18px 18px 22px;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.2);
+    max-height: 85vh; overflow-y: auto;
+  }
+  @media (min-width: 700px) { .modal-panel { border-radius: 16px; } }
+
+  #card .card-kind {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint);
+    margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+  }
+  #card .card-kind .switch-link {
+    text-transform: none; letter-spacing: 0; color: #3b6ea5; cursor: pointer; text-decoration: underline;
+    font-size: 11.5px;
+  }
+
+  /* ---------- theme-switch sub-dialog ---------- */
+  #themeSwitchPanel h3 { margin: 0 0 12px; font-size: 15px; }
+  #themeSwitchPanel .chip-list { display: flex; flex-direction: column; gap: 6px; }
+  #themeSwitchPanel .chip-list .chip {
+    border: 1px solid #ddd6c6; border-radius: 10px; padding: 10px 12px; font-size: 13.5px;
+    cursor: pointer; background: #fff;
+  }
+  #themeSwitchPanel .chip-list .chip.current { border-color: var(--ink); background: #faf7ef; font-weight: 600; }
+
+  /* Two independent toggle buttons instead of a 3-way slider: pressing one
+     deactivates the other, and pressing whichever is already active turns
+     it off — landing on "live", which has no label and no active button. */
+  .toggle2 { display: flex; gap: 8px; margin: 0 0 16px; }
+  .toggle2 .tbtn {
+    flex: 1; text-align: center; padding: 10px 4px; font-size: 13px; font-weight: 600;
+    border-radius: 8px; cursor: pointer; border: 1.5px solid #ddd6c6; background: #fff;
+    color: var(--ink-faint);
+  }
+  .toggle2 .tbtn.active.done { background: #eae6da; border-color: var(--ink-faint); color: var(--ink); }
+  .toggle2 .tbtn.active.cancelled { background: #f3e6e2; border-color: #b85c5c; color: #963f3f; }
+
+  .status-at { font-size: 12px; color: var(--ink-faint); margin: -6px 0 14px; }
+
+  #card input[type=text]#cardText {
+    width: 100%; font-size: 17px; font-weight: 600; border: none;
+    border-bottom: 2px solid #eee; padding: 6px 2px 10px; margin-bottom: 14px;
+    background: transparent; color: var(--ink); font-family: inherit;
+  }
+  #card input[type=text]#cardText:focus { outline: none; border-bottom-color: var(--ink); }
+
+  .date-quickrow { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+  .date-quickrow .qd {
+    border: 1px solid #ddd6c6; background: #fff; border-radius: 14px; padding: 6px 11px;
+    font-size: 12px; cursor: pointer;
+  }
+  .date-quickrow input[type=date] {
+    border: 1px solid #ddd6c6; border-radius: 8px; padding: 6px 8px; font-size: 12.5px; background: #fff;
+  }
+  .date-display { font-size: 12.5px; color: var(--ink-faint); margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
+  .date-clear { border: none; background: none; color: var(--ink); font-size: 12px; cursor: pointer; padding: 0; text-decoration: underline; }
+
+  .row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .row label { font-size: 12px; color: var(--ink-faint); min-width: 46px; }
+  .row.theme-row select {
+    flex: 1; border: 1px solid #ddd6c6; border-radius: 8px; padding: 8px 9px; font-size: 13px; background: #fff;
+  }
+
+  .note {
+    display: flex; align-items: center; gap: 8px; padding: 7px 0;
+    border-bottom: 1px solid #f0ebdd;
+  }
+  .note .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink); opacity: 0.5; flex: none; }
+  .note.done .txt { text-decoration: line-through; color: var(--ink-faint); }
+  .note .txt { flex: 1; font-size: 13.5px; }
+  .note-input-row { margin-top: 6px; }
+  .note-input-row input {
+    width: 100%; border: 1px dashed #ddd6c6; border-radius: 8px; padding: 7px 9px; font-size: 13px;
+    background: transparent;
+  }
+  .note-input-row input:focus { outline: none; border-color: var(--ink); border-style: solid; background: #fff; }
+
+  .future-slot {
+    margin-top: 16px; padding: 10px 12px; border: 1px dashed #ddd6c6; border-radius: 10px;
+    color: var(--ink-faint); font-size: 12px;
+  }
+  .card-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .card-actions button {
+    border: none; border-radius: 8px; padding: 9px 14px; font-size: 13px; cursor: pointer;
+  }
+  .card-actions .close { background: #efe9db; color: var(--ink); }
+
+  /* ---------- new-blob picker ---------- */
+  #newblobPanel h3 { margin: 0 0 12px; font-size: 15px; }
+  #newblobPanel input[type=text] {
+    width: 100%; font-size: 15px; border: 1px solid #ddd6c6; border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 14px;
+  }
+  #newblobPanel .create-btn {
+    width: 100%; padding: 12px; border-radius: 8px; border: none; background: var(--ink);
+    color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+
+  /* ---------- stack switcher ---------- */
+  #stacksPanel h3 { margin: 0 0 12px; font-size: 15px; }
+  .new-stack-row { display: flex; gap: 8px; margin-bottom: 16px; }
+  .new-stack-row input {
+    flex: 1; border: 1px solid #ddd6c6; border-radius: 8px; padding: 9px 10px; font-size: 13.5px;
+  }
+  .new-stack-row button {
+    border: none; border-radius: 8px; background: var(--ink); color: #fff; padding: 9px 14px; font-size: 13px; cursor: pointer;
+  }
+  .stack-row {
+    display: flex; align-items: center; justify-content: space-between;
+    border: 1px solid #ece6d7; border-radius: 12px; padding: 12px 14px; margin-bottom: 8px;
+    cursor: pointer; background: #fff;
+  }
+  .stack-row.active { border-color: var(--ink); background: #faf7ef; }
+  .stack-row .sname { font-weight: 700; font-size: 14px; }
+  .stack-row .spaper { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
+  .stack-row .stouch { font-size: 11.5px; color: var(--ink-faint); text-align: right; }
+  .older-toggle {
+    text-align: center; font-size: 12.5px; color: var(--ink-faint); padding: 8px 0;
+    cursor: pointer; text-decoration: underline;
+  }
+
+  /* ---------- papers browser ---------- */
+  #papersPanel h3 { margin: 0 0 4px; font-size: 15px; }
+  #papersPanel .sub { font-size: 12px; color: var(--ink-faint); margin-bottom: 14px; }
+  .paper-row {
+    display: flex; align-items: center; justify-content: space-between;
+    border: 1px solid #ece6d7; border-radius: 12px; padding: 12px 14px; margin-bottom: 8px;
+    cursor: pointer; background: #fff;
+  }
+  .paper-row.current { border-color: var(--ink); background: #faf7ef; }
+  .paper-row .pname { font-weight: 700; font-size: 14px; }
+  .paper-row .pspan { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
+  .paper-row .ptag {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 3px 7px; border-radius: 6px; background: #efe9db; color: var(--ink-faint);
+  }
+  .paper-row.current .ptag { background: var(--ink); color: #fff; }
+
+  /* ---------- read-only detail viewer ---------- */
+  #readonlyCard h3 { margin: 0 0 4px; font-size: 16px; }
+  #readonlyCard .ro-meta { font-size: 12px; color: var(--ink-faint); margin-bottom: 14px; }
+  #readonlyCard .ro-state {
+    display: inline-block; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 6px; margin-bottom: 14px;
+  }
+  #readonlyCard .ro-state.done { background: #eae6da; color: var(--ink); }
+  #readonlyCard .ro-state.cancelled { background: #f3e6e2; color: #963f3f; }
+  #readonlyCard .ro-note { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13.5px; }
+  #readonlyCard .ro-note.done { text-decoration: line-through; color: var(--ink-faint); }
+  #readonlyCard .ro-note .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink); opacity: 0.5; flex: none; }
+</style>
+</head>
+<body>
+
+  <div id="topbar">
+    <div class="stackinfo" id="stackInfoBtn">
+      <span class="title" id="stackTitle">Home</span>
+      <span class="paperno" id="stackPaperNo">Paper #23</span>
+    </div>
+    <div class="btns">
+      <button id="openStacksBtn">Stacks ▾</button>
+      <button id="openPapersBtn">Papers ▾</button>
+      <button id="rearrangeBtn" title="Nudge overlapping bubbles apart">Rearrange ⤨</button>
+      <button id="newPaperBtn">New paper →</button>
+    </div>
+    <div class="meta" id="paperMeta">started Aug 2, 2026</div>
+  </div>
+
+  <div id="readonlyBanner">
+    <span>📁 Viewing an archived paper — read-only</span>
+    <button id="returnToCurrentBtn">Back to current paper →</button>
+  </div>
+
+  <div id="viewport">
+    <div id="canvas">
+      <svg id="lines"></svg>
+    </div>
+  </div>
+
+  <div id="zoomctl">
+    <button id="zoomIn">+</button>
+    <button id="zoomOut">−</button>
+    <button id="zoomReset" title="fit">⤢</button>
+  </div>
+
+  <div id="hint">Tap empty space to add · pinch/scroll to zoom · drag to pan</div>
+
+  <div id="quickAdd"><input type="text" id="quickAddInput" placeholder="new item, press Enter…" /></div>
+
+  <div class="modal-overlay" id="overlay"><div class="modal-panel" id="card"></div></div>
+  <div class="modal-overlay" id="newblob"><div class="modal-panel" id="newblobPanel"></div></div>
+  <div class="modal-overlay" id="stacksOverlay"><div class="modal-panel" id="stacksPanel"></div></div>
+  <div class="modal-overlay" id="themeSwitchOverlay"><div class="modal-panel" id="themeSwitchPanel"></div></div>
+  <div class="modal-overlay" id="papersOverlay"><div class="modal-panel" id="papersPanel"></div></div>
+  <div class="modal-overlay" id="readonlyCardOverlay"><div class="modal-panel" id="readonlyCard"></div></div>
+
+<script>
+(function () {
+  // ================= layout constants =================
+  const CANVAS_W = 1600, CANVAS_H = 2000;
+  const THEME_W = 118, THEME_H = 98;
+  const ITEM_W = 74, ITEM_H = 74;
+  const THEME_THEME_PAD = 52;
+  const THEME_ITEM_PAD = 30;
+  const ITEM_ITEM_PAD = 18;
+
+  // ================= deterministic per-bubble fingerprint =================
+  // A small hand-drawn-feeling identity (tilt, wobble, ink weight) derived
+  // from the bubble's own id — fixed at creation, stable forever. This is
+  // what makes each square visually distinct without relying on color.
+  function hashStr(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return h >>> 0;
+  }
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function fingerprint(id, kind) {
+    const rng = mulberry32(hashStr(id));
+    const rotRange = kind === "theme" ? 5 : 8;
+    const rot = (rng() * 2 - 1) * rotRange;
+    const brBase = kind === "theme" ? 16 : 10;
+    const brSpread = kind === "theme" ? 20 : 16;
+    const br = [0, 1, 2, 3].map(() => Math.round(brBase + rng() * brSpread));
+    const scaleMin = kind === "theme" ? 0.95 : 0.9;
+    const scaleSpread = kind === "theme" ? 0.13 : 0.22;
+    const scale = scaleMin + rng() * scaleSpread;
+    const inkAlpha = 0.72 + rng() * 0.28;
+    const borderW = kind === "theme" ? 2.6 + rng() * 0.8 : 1.3 + rng() * 0.6;
+    return { rot, br, scale, inkAlpha, borderW };
+  }
+
+  // ================= mock multi-stack data =================
+  let nextId = 200;
+  const now = new Date();
+  function isoDaysAgo(days, hours) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - days);
+    if (hours) d.setHours(d.getHours() - hours);
+    return d.toISOString();
+  }
+
+  // Each stack keeps ONE mutable currentPaper plus a frozen archive[] of
+  // retired papers. Archived papers are never edited again after the
+  // moment they're retired — see the "new paper" handler, which snapshots
+  // the current paper's live objects as-is into the archive, then builds
+  // brand-new cloned objects for the next currentPaper. That clone is the
+  // whole point: an item carried forward is a NEW object from then on, so
+  // editing it later can never reach back and alter the frozen archived
+  // snapshot, and vice versa.
+  const state = {
+    activeStackId: "home",
+    viewingArchiveIndex: null, // null = currentPaper; otherwise an index into the active stack's archive[]
+    stacks: {
+      home: {
+        name: "Home",
+        lastInteractionAt: isoDaysAgo(0, 0),
+        currentPaper: {
+          paperIndex: 23,
+          createdAt: isoDaysAgo(12),
+          themes: [
+            { id: "t1", text: "shopping for anniversary", date: "2026-08-20", state: "live", statusAt: null, x: 380, y: 260 },
+            { id: "t2", text: "renovate bathroom", date: null, state: "live", statusAt: null, x: 900, y: 420 },
+            { id: "t3", text: "shopping centre", date: null, state: "live", statusAt: null, x: 640, y: 760 },
+            { id: "t4", text: "prep for school", date: null, state: "live", statusAt: null, x: 1180, y: 200 },
+            { id: "t5", text: "learn chess", date: null, state: "live", statusAt: null, x: 220, y: 640 },
+            { id: "t6", text: "renew passport", date: "2026-09-02", state: "live", statusAt: null, x: 1120, y: 660 },
+          ],
+          items: [
+            { id: "i1", themeId: "t1", text: "cake", date: null, state: "live", x: 480, y: 190, notes: [] },
+            { id: "i2", themeId: "t1", text: "call cleaner", date: null, state: "done", x: 300, y: 190,
+              notes: [{ text: "Kristina, 070-555-1212", done: false }] },
+            { id: "i3", themeId: "t1", text: "check w/ mom re: present", date: null, state: "live", x: 470, y: 330, notes: [] },
+            { id: "i4", themeId: "t1", text: "book restaurant", date: "2026-08-19", state: "done", x: 300, y: 330, notes: [] },
+            { id: "i5", themeId: "t2", text: "get stuff at bauhaus", date: null, state: "live", x: 1010, y: 350,
+              notes: [
+                { text: "paint", done: false },
+                { text: "brush", done: false },
+                { text: "tape", done: true },
+                { text: "paper", done: false },
+              ] },
+            { id: "i6", themeId: "t2", text: "book plumber", date: null, state: "live", x: 990, y: 500, notes: [] },
+            { id: "i7", themeId: "t3", text: "new towels", date: null, state: "live", x: 560, y: 830, notes: [] },
+            { id: "i8", themeId: "t3", text: "batteries", date: null, state: "done", x: 710, y: 830, notes: [] },
+            { id: "i9", themeId: "t4", text: "buy pencil case", date: null, state: "live", x: 1260, y: 150, notes: [] },
+            { id: "i10", themeId: "t4", text: "call joe re: carpool", date: null, state: "cancelled", x: 1250, y: 280,
+              notes: [{ text: "Joe — 073-222-9090, ask about Tue/Thu pickup", done: false }] },
+            { id: "i11", themeId: "t6", text: "passport photo", date: null, state: "live", x: 1200, y: 590, notes: [] },
+          ],
+        },
+        archive: [
+          {
+            paperIndex: 22,
+            createdAt: isoDaysAgo(26),
+            retiredAt: isoDaysAgo(12),
+            themes: [
+              { id: "arc22t1", text: "summer holiday packing", date: "2026-07-10", state: "done", statusAt: isoDaysAgo(13), x: 400, y: 260 },
+              { id: "arc22t2", text: "fix garden fence", date: null, state: "done", statusAt: isoDaysAgo(14), x: 850, y: 380 },
+              { id: "arc22t3", text: "learn ukulele", date: null, state: "cancelled", statusAt: isoDaysAgo(12), x: 620, y: 640 },
+            ],
+            items: [
+              { id: "arc22i1", themeId: "arc22t1", text: "buy sunscreen", date: null, state: "done", x: 300, y: 190, notes: [] },
+              { id: "arc22i2", themeId: "arc22t1", text: "print boarding passes", date: null, state: "done", x: 500, y: 190, notes: [] },
+              { id: "arc22i3", themeId: "arc22t2", text: "buy new posts", date: null, state: "done", x: 950, y: 300, notes: [] },
+            ],
+          },
+        ],
+      },
+      work: {
+        name: "Work",
+        lastInteractionAt: isoDaysAgo(2, 3),
+        currentPaper: {
+          paperIndex: 5,
+          createdAt: isoDaysAgo(9),
+          themes: [
+            { id: "wt1", text: "Q3 report", date: "2026-08-25", state: "live", statusAt: null, x: 420, y: 260 },
+            { id: "wt2", text: "hire contractor", date: null, state: "live", statusAt: null, x: 900, y: 300 },
+            { id: "wt3", text: "expense receipts", date: null, state: "live", statusAt: null, x: 620, y: 620 },
+          ],
+          items: [
+            { id: "wi1", themeId: "wt1", text: "pull sales numbers", date: null, state: "done", x: 300, y: 200, notes: [] },
+            { id: "wi2", themeId: "wt1", text: "draft slides", date: "2026-08-24", state: "live", x: 520, y: 210, notes: [] },
+            { id: "wi3", themeId: "wt2", text: "post job ad", date: null, state: "live", x: 990, y: 230, notes: [] },
+            { id: "wi4", themeId: "wt2", text: "screen candidates", date: null, state: "live", x: 990, y: 380, notes: [] },
+            { id: "wi5", themeId: "wt3", text: "scan taxi receipts", date: null, state: "cancelled", x: 700, y: 560,
+              notes: [{ text: "lost the paper ones — ask finance for reissue", done: false }] },
+          ],
+        },
+        archive: [],
+      },
+      renovation: {
+        name: "Renovation",
+        lastInteractionAt: isoDaysAgo(0, 1),
+        currentPaper: {
+          paperIndex: 1,
+          createdAt: isoDaysAgo(0, 1),
+          themes: [
+            { id: "rt1", text: "bathroom retile", date: null, state: "live", statusAt: null, x: 420, y: 300 },
+            { id: "rt2", text: "kitchen quote", date: "2026-09-10", state: "live", statusAt: null, x: 900, y: 420 },
+          ],
+          items: [
+            { id: "ri1", themeId: "rt1", text: "pick tile colour", date: null, state: "live", x: 300, y: 230, notes: [] },
+            { id: "ri2", themeId: "rt2", text: "call 2nd contractor", date: null, state: "live", x: 1000, y: 350, notes: [] },
+          ],
+        },
+        archive: [],
+      },
+    },
+  };
+
+  function S() { return state.stacks[state.activeStackId]; }
+  // The paper actually being displayed: the stack's live paper, or a
+  // frozen one pulled up from the archive for viewing.
+  function AP() {
+    return state.viewingArchiveIndex === null ? S().currentPaper : S().archive[state.viewingArchiveIndex];
+  }
+  function isReadOnly() { return state.viewingArchiveIndex !== null; }
+  function markInteraction() { S().lastInteractionAt = new Date().toISOString(); }
+
+  const svg = document.getElementById("lines");
+  const canvas = document.getElementById("canvas");
+  const viewport = document.getElementById("viewport");
+
+  // ================= helpers =================
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function todayISO() { return new Date().toISOString().slice(0, 10); }
+  function addDaysISO(n) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+  function fmtDateShort(iso) { const d = new Date(iso + "T00:00:00"); return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
+  function fmtDateLong(iso) { const d = new Date(iso + "T00:00:00"); return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }); }
+  function fmtDateTimeLong(iso) { const d = new Date(iso); return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
+  function relTime(iso) {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.round(diffMs / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return mins + "m ago";
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return hrs + "h ago";
+    const days = Math.round(hrs / 24);
+    if (days < 7) return days + "d ago";
+    const weeks = Math.round(days / 7);
+    if (weeks < 5) return weeks + "w ago";
+    const months = Math.round(days / 30);
+    return months + "mo ago";
+  }
+
+  // ================= collision solver =================
+  // Rectangle-overlap separation with a required gap. moveA/moveB decide
+  // which side actually shifts — themes anchor the layout (move only
+  // against each other), items always yield to whatever they're near.
+  function separate(a, aw, ah, b, bw, bh, pad, moveA, moveB) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const minX = (aw + bw) / 2 + pad, minY = (ah + bh) / 2 + pad;
+    const overlapX = minX - Math.abs(dx);
+    const overlapY = minY - Math.abs(dy);
+    if (overlapX <= 0 || overlapY <= 0) return false;
+    let shiftX = 0, shiftY = 0;
+    if (overlapX < overlapY) {
+      const sign = dx === 0 ? (Math.random() < 0.5 ? -1 : 1) : Math.sign(dx);
+      shiftX = overlapX * sign;
+    } else {
+      const sign = dy === 0 ? (Math.random() < 0.5 ? -1 : 1) : Math.sign(dy);
+      shiftY = overlapY * sign;
+    }
+    const fracA = moveA ? (moveB ? 0.5 : 1) : 0;
+    const fracB = moveB ? (moveA ? 0.5 : 1) : 0;
+    if (moveA) { a.x -= shiftX * fracA; a.y -= shiftY * fracA; }
+    if (moveB) { b.x += shiftX * fracB; b.y += shiftY * fracB; }
+    return true;
+  }
+
+  // Keeps themes apart from each other (dragging their own items along on
+  // any shift), then pushes items off themes and off each other. Runs after
+  // every structural change AND once at load, so hand-placed seed data gets
+  // the same guaranteed minimum gaps as anything created at runtime.
+  function declutter(jitter) {
+    const themes = AP().themes, items = AP().items;
+    if (jitter) {
+      // A tiny random nudge before separating — gives bubbles stuck against
+      // the canvas edge (or wedged in a locally-stable-but-cramped spot) a
+      // chance to actually move apart, instead of the solver reporting
+      // "no overlap left to fix" on a configuration that still looks tight.
+      themes.forEach((t) => { t.x += (Math.random() * 2 - 1) * jitter; t.y += (Math.random() * 2 - 1) * jitter; });
+      items.forEach((it) => { it.x += (Math.random() * 2 - 1) * jitter; it.y += (Math.random() * 2 - 1) * jitter; });
+    }
+    const before = new Map(themes.map((t) => [t.id, { x: t.x, y: t.y }]));
+
+    for (let iter = 0; iter < 60; iter++) {
+      let moved = false;
+      for (let i = 0; i < themes.length; i++)
+        for (let j = i + 1; j < themes.length; j++)
+          if (separate(themes[i], THEME_W, THEME_H, themes[j], THEME_W, THEME_H, THEME_THEME_PAD, true, true)) moved = true;
+      themes.forEach((t) => {
+        t.x = clamp(t.x, THEME_W / 2 + 20, CANVAS_W - THEME_W / 2 - 20);
+        t.y = clamp(t.y, THEME_H / 2 + 20, CANVAS_H - THEME_H / 2 - 20);
+      });
+      if (!moved) break;
+    }
+    themes.forEach((t) => {
+      const b = before.get(t.id);
+      const dx = t.x - b.x, dy = t.y - b.y;
+      if (dx || dy) items.filter((it) => it.themeId === t.id).forEach((it) => { it.x += dx; it.y += dy; });
+    });
+
+    for (let iter = 0; iter < 150; iter++) {
+      let moved = false;
+      for (const it of items)
+        for (const t of themes)
+          if (separate(it, ITEM_W, ITEM_H, t, THEME_W, THEME_H, THEME_ITEM_PAD, true, false)) moved = true;
+      for (let i = 0; i < items.length; i++)
+        for (let j = i + 1; j < items.length; j++)
+          if (separate(items[i], ITEM_W, ITEM_H, items[j], ITEM_W, ITEM_H, ITEM_ITEM_PAD, true, true)) moved = true;
+      items.forEach((it) => {
+        it.x = clamp(it.x, ITEM_W / 2 + 10, CANVAS_W - ITEM_W / 2 - 10);
+        it.y = clamp(it.y, ITEM_H / 2 + 10, CANVAS_H - ITEM_H / 2 - 10);
+      });
+      if (!moved) break;
+    }
+  }
+
+  // Initial guess near a theme — declutter() does the real work of
+  // guaranteeing no overlap; this just biases the starting direction.
+  function placeNearTheme(theme) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = (THEME_W + ITEM_W) / 2 + THEME_ITEM_PAD + Math.random() * 30;
+    return {
+      x: clamp(theme.x + Math.cos(angle) * r, ITEM_W / 2 + 10, CANVAS_W - ITEM_W / 2 - 10),
+      y: clamp(theme.y + Math.sin(angle) * r, ITEM_H / 2 + 10, CANVAS_H - ITEM_H / 2 - 10),
+    };
+  }
+
+  // ================= render =================
+  // Longer text gets a smaller font instead of spilling past the fixed
+  // box — the box size never changes, only how densely the label packs.
+  function fontSizeFor(kind, text) {
+    const base = kind === "theme" ? 13.5 : 12;
+    const len = text.length;
+    if (len <= 10) return base;
+    const shrink = Math.min(4.5, (len - 10) * 0.18);
+    return Math.max(kind === "theme" ? 9.5 : 8.5, base - shrink);
+  }
+
+  // Set right before render() by any creation flow; consumed once so the
+  // pulse plays exactly one time on the newly created bubble, then never
+  // again on subsequent re-renders of the same board.
+  let pulseId = null;
+
+  function bubbleEl(kind, obj, readOnly) {
+    const fp = fingerprint(obj.id, kind);
+    const el = document.createElement("div");
+    el.className = `bubble ${kind} state-${obj.state}` + (obj.id === pulseId ? " pulse-in" : "");
+    const w = kind === "theme" ? THEME_W : ITEM_W;
+    const h = kind === "theme" ? THEME_H : ITEM_H;
+    el.style.left = obj.x - w / 2 + "px";
+    el.style.top = obj.y - h / 2 + "px";
+    el.style.width = w + "px";
+    el.style.height = h + "px";
+    el.style.borderRadius = `${fp.br[0]}px ${fp.br[1]}px ${fp.br[2]}px ${fp.br[3]}px`;
+    el.style.borderWidth = fp.borderW.toFixed(1) + "px";
+    el.style.borderColor = `rgba(38,34,32,${fp.inkAlpha.toFixed(2)})`;
+    el.style.transform = `rotate(${fp.rot.toFixed(1)}deg) scale(${fp.scale.toFixed(2)})`;
+    el.style.fontSize = fontSizeFor(kind, obj.text) + "px";
+    el.dataset.id = obj.id;
+    el.dataset.kind = kind;
+
+    if (kind === "theme") {
+      el.innerHTML = `
+        <div class="txt">${escapeHtml(obj.text)}</div>
+        ${obj.date ? `<div class="theme-date">${fmtDateShort(obj.date)}</div>` : ""}
+      `;
+      if (!readOnly) {
+        const addBtn = document.createElement("div");
+        addBtn.className = "theme-add-btn";
+        addBtn.textContent = "+";
+        addBtn.title = "Add item to this theme";
+        addBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openQuickAdd(obj, addBtn);
+        });
+        el.appendChild(addBtn);
+      }
+    } else {
+      el.innerHTML = `<div class="txt">${escapeHtml(obj.text)}</div>`;
+      if (obj.date) {
+        const tag = document.createElement("div");
+        tag.className = "date-tag";
+        tag.textContent = fmtDateShort(obj.date);
+        el.appendChild(tag);
+      }
+    }
+
+    if (obj.state === "cancelled") {
+      const xmark = document.createElement("div");
+      xmark.className = "x-mark";
+      xmark.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        <line x1="12" y1="12" x2="88" y2="88" />
+        <line x1="88" y1="12" x2="12" y2="88" />
+      </svg>`;
+      el.appendChild(xmark);
+    }
+
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (dragged) return;
+      if (readOnly) openReadOnlyCard(kind, obj);
+      else openCard(kind, obj.id);
+    });
+    return el;
+  }
+
+  function render() {
+    canvas.querySelectorAll(".bubble").forEach((n) => n.remove());
+    svg.innerHTML = "";
+
+    const paper = AP();
+    const readOnly = isReadOnly();
+
+    paper.items.forEach((it) => {
+      const th = paper.themes.find((t) => t.id === it.themeId);
+      if (!th) return;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", th.x);
+      line.setAttribute("y1", th.y);
+      line.setAttribute("x2", it.x);
+      line.setAttribute("y2", it.y);
+      if (it.state !== "live") line.setAttribute("class", "done-line");
+      svg.appendChild(line);
+    });
+
+    paper.themes.forEach((t) => canvas.appendChild(bubbleEl("theme", t, readOnly)));
+    paper.items.forEach((it) => canvas.appendChild(bubbleEl("item", it, readOnly)));
+    pulseId = null;
+
+    canvas.classList.toggle("readonly", readOnly);
+    document.getElementById("hint").style.display = readOnly ? "none" : "";
+
+    document.getElementById("stackTitle").textContent = S().name;
+    document.getElementById("stackPaperNo").textContent = `Paper #${paper.paperIndex}`;
+    document.getElementById("paperMeta").textContent = readOnly
+      ? `archived — ${fmtDateTimeLong(paper.createdAt)} to ${fmtDateTimeLong(paper.retiredAt)}`
+      : `started ${fmtDateTimeLong(paper.createdAt)}`;
+
+    const banner = document.getElementById("readonlyBanner");
+    banner.style.display = readOnly ? "flex" : "none";
+    viewport.classList.toggle("has-banner", readOnly);
+
+    document.getElementById("rearrangeBtn").disabled = readOnly;
+    document.getElementById("newPaperBtn").style.display = readOnly ? "none" : "";
+  }
+
+  // ================= pan & zoom =================
+  let scale = 0.62, panX = -40, panY = -20;
+  let isPanning = false, panStart = null, dragged = false;
+
+  function applyTransform() { canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`; }
+
+  // Zooms while keeping the canvas point under (clientX, clientY) fixed on
+  // screen — so the zoom expands/contracts around wherever the hand/cursor
+  // is, not the viewport's top-left corner.
+  function zoomAt(clientX, clientY, newScale) {
+    const rect = viewport.getBoundingClientRect();
+    const mx = clientX - rect.left, my = clientY - rect.top;
+    const cx = (mx - panX) / scale, cy = (my - panY) / scale;
+    scale = clamp(newScale, 0.3, 1.6);
+    panX = mx - cx * scale;
+    panY = my - cy * scale;
+    applyTransform();
+  }
+
+  viewport.addEventListener("pointerdown", (e) => {
+    isPanning = true; dragged = false;
+    panStart = { x: e.clientX, y: e.clientY, panX, panY };
+    viewport.classList.add("panning");
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!isPanning) return;
+    const dx = e.clientX - panStart.x, dy = e.clientY - panStart.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragged = true;
+    panX = panStart.panX + dx; panY = panStart.panY + dy;
+    applyTransform();
+  });
+  window.addEventListener("pointerup", () => {
+    isPanning = false; viewport.classList.remove("panning");
+    setTimeout(() => (dragged = false), 0);
+  });
+  viewport.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    // 0.0013 is the prior 0.001 rate increased 30%, per feedback.
+    zoomAt(e.clientX, e.clientY, scale - e.deltaY * 0.0013);
+  }, { passive: false });
+
+  function zoomAtCenter(newScale) {
+    const rect = viewport.getBoundingClientRect();
+    zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, newScale);
+  }
+  document.getElementById("zoomIn").onclick = () => zoomAtCenter(scale + 0.195);
+  document.getElementById("zoomOut").onclick = () => zoomAtCenter(scale - 0.195);
+  document.getElementById("zoomReset").onclick = () => { scale = 0.62; panX = -40; panY = -20; applyTransform(); };
+
+  viewport.addEventListener("click", (e) => {
+    if (dragged) return;
+    if (isReadOnly()) return; // archived paper: pan/zoom to look, but nothing new can be added
+    if (e.target.closest(".bubble")) return;
+    const rect = canvas.getBoundingClientRect();
+    openNewBlob((e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale);
+  });
+
+  // ================= theme quick-add =================
+  const quickAdd = document.getElementById("quickAdd");
+  const quickAddInput = document.getElementById("quickAddInput");
+  let quickAddTheme = null;
+
+  function openQuickAdd(theme, anchorEl) {
+    quickAddTheme = theme;
+    const rect = anchorEl.getBoundingClientRect();
+    quickAdd.style.display = "block";
+    // Clamp so the popup never runs off the right/bottom edge of the screen.
+    const popW = 210, popH = 44;
+    let left = rect.right + 8;
+    let top = rect.top - 6;
+    if (left + popW > window.innerWidth) left = rect.left - popW - 8;
+    if (top + popH > window.innerHeight) top = window.innerHeight - popH - 8;
+    quickAdd.style.left = Math.max(6, left) + "px";
+    quickAdd.style.top = Math.max(6, top) + "px";
+    quickAddInput.value = "";
+    quickAddInput.focus();
+  }
+  function closeQuickAdd() {
+    quickAdd.style.display = "none";
+    quickAddTheme = null;
+  }
+  quickAddInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { closeQuickAdd(); return; }
+    if (e.key !== "Enter") return;
+    const text = quickAddInput.value.trim();
+    if (!text || !quickAddTheme) { closeQuickAdd(); return; }
+    const id = "i" + (nextId++);
+    const pos = placeNearTheme(quickAddTheme);
+    AP().items.push({ id, themeId: quickAddTheme.id, text, date: null, state: "live", x: pos.x, y: pos.y, notes: [] });
+    declutter();
+    markInteraction();
+    closeQuickAdd();
+    pulseId = id;
+    render();
+  });
+  document.addEventListener("click", (e) => {
+    if (quickAdd.style.display === "block" && !quickAdd.contains(e.target) && !e.target.closest(".theme-add-btn")) {
+      closeQuickAdd();
+    }
+  });
+  viewport.addEventListener("pointerdown", (e) => {
+    if (quickAdd.style.display === "block" && !e.target.closest(".theme-add-btn") && !quickAdd.contains(e.target)) {
+      closeQuickAdd();
+    }
+  });
+
+  // ================= detail card =================
+  const overlay = document.getElementById("overlay");
+  const card = document.getElementById("card");
+  function closeCard() { overlay.classList.remove("open"); render(); }
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeCard(); });
+
+  function renderDateField(obj, idPrefix) {
+    const display = obj.date ? fmtDateLong(obj.date) : "No due date";
+    return `
+      <div class="date-quickrow">
+        <button type="button" class="qd" data-days="1">Tomorrow</button>
+        <button type="button" class="qd" data-days="2">+2d</button>
+        <button type="button" class="qd" data-days="5">+5d</button>
+        <button type="button" class="qd" data-days="30">+30d</button>
+        <input type="date" id="${idPrefix}CustomDate" value="${obj.date || ""}" />
+      </div>
+      <div class="date-display">
+        ${obj.date ? `Due ${display}` : "No due date"}
+        ${obj.date ? `<button type="button" class="date-clear" id="${idPrefix}ClearDate">clear</button>` : ""}
+      </div>
+    `;
+  }
+  function wireDateField(obj, kind, id) {
+    card.querySelectorAll(".qd").forEach((btn) => {
+      btn.addEventListener("click", () => { obj.date = addDaysISO(+btn.dataset.days); markInteraction(); openCard(kind, id); });
+    });
+    const customInput = card.querySelector(`#${kind}CustomDate`);
+    if (customInput) customInput.addEventListener("change", (e) => { obj.date = e.target.value || null; markInteraction(); openCard(kind, id); });
+    const clearBtn = card.querySelector(`#${kind}ClearDate`);
+    if (clearBtn) clearBtn.addEventListener("click", () => { obj.date = null; markInteraction(); openCard(kind, id); });
+  }
+
+  function renderNotes(obj) {
+    const existing = obj.notes.map((n, idx) => `
+      <div class="note ${n.done ? "done" : ""}" data-idx="${idx}">
+        <div class="dot"></div>
+        <div class="txt">${escapeHtml(n.text)}</div>
+      </div>
+    `).join("");
+    return existing + `<div class="note-input-row"><input type="text" placeholder="add a note, press Enter…" /></div>`;
+  }
+  function wireNotes(obj) {
+    card.querySelectorAll(".note").forEach((el) => {
+      el.addEventListener("click", () => {
+        const idx = +el.dataset.idx;
+        obj.notes[idx].done = !obj.notes[idx].done;
+        markInteraction();
+        card.querySelector("#notesList").innerHTML = renderNotes(obj);
+        wireNotes(obj);
+      });
+    });
+    const input = card.querySelector(".note-input-row input");
+    if (input) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        const v = input.value.trim();
+        if (!v) return;
+        obj.notes.push({ text: v, done: false });
+        markInteraction();
+        card.querySelector("#notesList").innerHTML = renderNotes(obj);
+        wireNotes(obj);
+        const newInput = card.querySelector(".note-input-row input");
+        if (newInput) newInput.focus();
+      });
+    }
+  }
+
+  function openCard(kind, id) {
+    const obj = (kind === "theme" ? AP().themes : AP().items).find((o) => o.id === id);
+    if (!obj) return;
+
+    const toggleBlock = `
+      <div class="toggle2" id="stateToggle">
+        <div class="tbtn done ${obj.state === "done" ? "active done" : ""}" data-s="done">Done ⁄</div>
+        <div class="tbtn cancelled ${obj.state === "cancelled" ? "active cancelled" : ""}" data-s="cancelled">Cancelled ✕</div>
+      </div>
+    `;
+
+    if (kind === "item") {
+      const theme = AP().themes.find((t) => t.id === obj.themeId);
+      card.innerHTML = `
+        <div class="card-kind">
+          <span>${escapeHtml(theme ? theme.text : "no theme")}</span>
+          <span class="switch-link" id="switchThemeLink">Switch</span>
+        </div>
+        ${toggleBlock}
+        <input type="text" id="cardText" value="${escapeHtml(obj.text)}" />
+        ${renderDateField(obj, "item")}
+        <div id="notesList">${renderNotes(obj)}</div>
+        <div class="card-actions"><button class="close" id="closeCardBtn">Close</button></div>
+      `;
+    } else {
+      card.innerHTML = `
+        <div class="card-kind">Theme</div>
+        ${toggleBlock}
+        <input type="text" id="cardText" value="${escapeHtml(obj.text)}" />
+        ${obj.state !== "live" && obj.statusAt ? `<div class="status-at">Marked ${obj.state} on ${fmtDateLong(obj.statusAt)}</div>` : ""}
+        ${renderDateField(obj, "theme")}
+        <div class="future-slot">✳ Start a coaching conversation about this theme (coming soon)</div>
+        <div class="card-actions"><button class="close" id="closeCardBtn">Close</button></div>
+      `;
+    }
+
+    overlay.classList.add("open");
+    card.querySelector("#cardText").addEventListener("change", (e) => { obj.text = e.target.value; markInteraction(); });
+    wireDateField(obj, kind, id);
+
+    const toggle = card.querySelector("#stateToggle");
+    toggle.querySelectorAll(".tbtn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        // Pressing the already-active button turns it off (back to "live");
+        // pressing the other one switches straight to it, deactivating any
+        // previously-active button. Both-off is "live" — no label, default.
+        obj.state = obj.state === btn.dataset.s ? "live" : btn.dataset.s;
+        if (kind === "theme") obj.statusAt = obj.state === "live" ? null : todayISO();
+        markInteraction();
+        openCard(kind, id);
+      });
+    });
+
+    if (kind === "item") {
+      card.querySelector("#switchThemeLink").addEventListener("click", () => openThemeSwitch(obj, kind, id));
+      wireNotes(obj);
+    }
+    card.querySelector("#closeCardBtn").addEventListener("click", closeCard);
+  }
+
+  // ================= theme switch sub-dialog =================
+  // Opened from the "Switch" link in an item card's header — kept as a
+  // separate lightweight dialog rather than an always-visible dropdown,
+  // since reassigning an item's theme is rare and shouldn't clutter the
+  // card's main view.
+  const themeSwitchOverlay = document.getElementById("themeSwitchOverlay");
+  const themeSwitchPanel = document.getElementById("themeSwitchPanel");
+
+  function openThemeSwitch(item, kind, id) {
+    themeSwitchPanel.innerHTML = `
+      <h3>Move "${escapeHtml(item.text)}" to…</h3>
+      <div class="chip-list">
+        ${AP().themes.map((t) => `
+          <div class="chip ${t.id === item.themeId ? "current" : ""}" data-theme="${t.id}">
+            ${escapeHtml(t.text)}${t.id === item.themeId ? " (current)" : ""}
+          </div>
+        `).join("")}
+      </div>
+    `;
+    themeSwitchPanel.querySelectorAll(".chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const newTheme = AP().themes.find((t) => t.id === chip.dataset.theme);
+        if (newTheme && newTheme.id !== item.themeId) {
+          item.themeId = newTheme.id;
+          const pos = placeNearTheme(newTheme);
+          item.x = pos.x; item.y = pos.y;
+          declutter();
+          markInteraction();
+        }
+        themeSwitchOverlay.classList.remove("open");
+        openCard(kind, id);
+      });
+    });
+    themeSwitchOverlay.classList.add("open");
+  }
+  themeSwitchOverlay.addEventListener("click", (e) => {
+    if (e.target === themeSwitchOverlay) themeSwitchOverlay.classList.remove("open");
+  });
+
+  // ================= new blob panel =================
+  // Items can now only be created via a theme's own "+" button, so tapping
+  // empty paper always means "new theme" — a single text input, Enter (or
+  // the button) creates it right there at the tapped spot. No date prompt;
+  // due date and everything else is set afterwards by opening the theme.
+  const newblob = document.getElementById("newblob");
+  const newblobPanel = document.getElementById("newblobPanel");
+  let pendingXY = { x: 400, y: 400 };
+
+  function openNewBlob(x, y) {
+    pendingXY = { x, y };
+    renderNewBlob();
+    newblob.classList.add("open");
+    setTimeout(() => newblobPanel.querySelector("#blobText")?.focus(), 0);
+  }
+  function closeNewBlob() { newblob.classList.remove("open"); }
+  newblob.addEventListener("click", (e) => { if (e.target === newblob) closeNewBlob(); });
+
+  function renderNewBlob() {
+    newblobPanel.innerHTML = `
+      <h3>New theme</h3>
+      <input type="text" id="blobText" placeholder="type it, then press Enter…" />
+      <button class="create-btn" id="createBlobBtn">Add to paper</button>
+    `;
+
+    function commit() {
+      const text = newblobPanel.querySelector("#blobText").value.trim();
+      if (!text) return;
+      const id = "t" + (nextId++);
+      AP().themes.push({ id, text, date: null, state: "live", statusAt: null, x: pendingXY.x, y: pendingXY.y });
+      declutter();
+      markInteraction();
+      closeNewBlob();
+      pulseId = id;
+      render();
+    }
+
+    newblobPanel.querySelector("#blobText").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") commit();
+    });
+    newblobPanel.querySelector("#createBlobBtn").addEventListener("click", commit);
+  }
+
+  // ================= rearrange (manual declutter) =================
+  // Re-runs the same minimal-movement separation solver used after every
+  // add/edit, on demand — for when the page just feels too cramped and
+  // you want everything nudged apart without starting a new paper.
+  document.getElementById("rearrangeBtn").addEventListener("click", () => {
+    declutter(24);
+    markInteraction();
+    render();
+  });
+
+  // ================= new paper =================
+  // Carry-over is decided purely by each theme's own status: every item
+  // under a live theme moves — even if that item is itself done/cancelled,
+  // since an item's mark is presentation, not a signal to strand it. Only
+  // themes that are done/cancelled (and everything under them) stay behind.
+  //
+  // The retiring paper's own theme/item objects are frozen into archive[]
+  // completely untouched — that's what makes it a permanent, read-only
+  // record. The new currentPaper does NOT reuse those objects for the
+  // carried-forward themes/items: it clones them with brand-new ids.
+  // Without that clone, the same object would sit in both the archived
+  // paper's list and the live paper's list — editing it later (renaming,
+  // marking done, moving) would silently rewrite history on the paper
+  // that's supposed to be frozen. Cloning severs that link at the moment
+  // of retirement, so each paper's objects are truly its own from then on.
+  document.getElementById("newPaperBtn").addEventListener("click", () => {
+    const stack = S();
+    const retiring = stack.currentPaper;
+    const liveThemes = retiring.themes.filter((t) => t.state === "live");
+    const liveThemeIds = new Set(liveThemes.map((t) => t.id));
+    const carriedItems = retiring.items.filter((it) => liveThemeIds.has(it.themeId));
+    const leftBehindThemes = retiring.themes.length - liveThemes.length;
+    const leftBehindItems = retiring.items.length - carriedItems.length;
+
+    const ok = confirm(
+      `Retire "${stack.name}" paper #${retiring.paperIndex} and start #${retiring.paperIndex + 1}?\n\n` +
+      `Carries forward: ${liveThemes.length} live theme(s), ${carriedItems.length} item(s) under them (done/cancelled included).\n` +
+      `Left behind as a static, frozen record: ${leftBehindThemes} theme(s), ${leftBehindItems} item(s).\n\n` +
+      `Paper #${retiring.paperIndex} will stay browsable under Papers ▾, exactly as it looks now — nothing on it can be edited again.`
+    );
+    if (!ok) return;
+
+    const retiredAt = new Date().toISOString();
+    stack.archive.push({ ...retiring, retiredAt });
+
+    const themeIdMap = new Map();
+    const clonedThemes = liveThemes.map((t) => {
+      const newId = "t" + (nextId++);
+      themeIdMap.set(t.id, newId);
+      return { ...t, id: newId };
+    });
+    const clonedItems = carriedItems.map((it) => ({
+      ...it,
+      id: "i" + (nextId++),
+      themeId: themeIdMap.get(it.themeId),
+      notes: it.notes.map((n) => ({ ...n })),
+    }));
+
+    stack.currentPaper = {
+      paperIndex: retiring.paperIndex + 1,
+      createdAt: retiredAt,
+      themes: clonedThemes,
+      items: clonedItems,
+    };
+    state.viewingArchiveIndex = null;
+    markInteraction();
+    declutter();
+    render();
+  });
+
+  // ================= papers browser =================
+  // Lists the active stack's currentPaper plus every archived paper, most
+  // recent first, so you can jump back to look at an old one — read-only,
+  // per the archive contract above. Picking the current paper's row (or
+  // the banner's "back to current" button) is the only way back to editing.
+  const papersOverlay = document.getElementById("papersOverlay");
+  const papersPanel = document.getElementById("papersPanel");
+
+  function openPapers() { renderPapers(); papersOverlay.classList.add("open"); }
+  function closePapers() { papersOverlay.classList.remove("open"); }
+  papersOverlay.addEventListener("click", (e) => { if (e.target === papersOverlay) closePapers(); });
+  document.getElementById("openPapersBtn").addEventListener("click", openPapers);
+
+  function renderPapers() {
+    const stack = S();
+    const rows = [
+      { label: "Current", isCurrent: true, archiveIndex: null, paper: stack.currentPaper },
+      ...stack.archive.map((p, i) => ({ label: "Archived", isCurrent: false, archiveIndex: i, paper: p })),
+    ].sort((a, b) => b.paper.paperIndex - a.paper.paperIndex);
+
+    papersPanel.innerHTML = `
+      <h3>${escapeHtml(stack.name)} — papers</h3>
+      <div class="sub">Archived papers are frozen the moment they're retired — nothing on them can change.</div>
+      ${rows.map((r) => `
+        <div class="paper-row ${r.isCurrent ? "current" : ""}" data-archive-index="${r.archiveIndex === null ? "" : r.archiveIndex}">
+          <div>
+            <div class="pname">Paper #${r.paper.paperIndex}</div>
+            <div class="pspan">${fmtDateTimeLong(r.paper.createdAt)}${r.paper.retiredAt ? " – " + fmtDateTimeLong(r.paper.retiredAt) : " – now"}</div>
+          </div>
+          <div class="ptag">${r.isCurrent ? "current" : "archived"}</div>
+        </div>
+      `).join("")}
+    `;
+
+    papersPanel.querySelectorAll(".paper-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        const idx = row.dataset.archiveIndex;
+        state.viewingArchiveIndex = idx === "" ? null : Number(idx);
+        closePapers();
+        render();
+      });
+    });
+  }
+
+  document.getElementById("returnToCurrentBtn").addEventListener("click", () => {
+    state.viewingArchiveIndex = null;
+    render();
+  });
+
+  // ================= read-only detail viewer =================
+  // Opened instead of the editable card when tapping a bubble on an
+  // archived paper — same information, no inputs, no way to change state.
+  const readonlyCardOverlay = document.getElementById("readonlyCardOverlay");
+  const readonlyCard = document.getElementById("readonlyCard");
+
+  function openReadOnlyCard(kind, obj) {
+    const stateLabel = obj.state === "done" ? "Done" : obj.state === "cancelled" ? "Cancelled" : null;
+    const theme = kind === "item" ? AP().themes.find((t) => t.id === obj.themeId) : null;
+    readonlyCard.innerHTML = `
+      ${kind === "item" && theme ? `<div class="ro-meta">${escapeHtml(theme.text)}</div>` : ""}
+      <h3>${escapeHtml(obj.text)}</h3>
+      ${obj.date ? `<div class="ro-meta">Due ${fmtDateLong(obj.date)}</div>` : ""}
+      ${stateLabel ? `<div class="ro-state ${obj.state}">${stateLabel}${obj.statusAt ? " — " + fmtDateLong(obj.statusAt) : ""}</div>` : ""}
+      ${kind === "item" && obj.notes.length ? obj.notes.map((n) => `
+        <div class="ro-note ${n.done ? "done" : ""}"><div class="dot"></div><div>${escapeHtml(n.text)}</div></div>
+      `).join("") : ""}
+      <div class="card-actions"><button class="close" id="closeReadOnlyBtn">Close</button></div>
+    `;
+    readonlyCardOverlay.classList.add("open");
+    readonlyCard.querySelector("#closeReadOnlyBtn").addEventListener("click", () => {
+      readonlyCardOverlay.classList.remove("open");
+    });
+  }
+  readonlyCardOverlay.addEventListener("click", (e) => {
+    if (e.target === readonlyCardOverlay) readonlyCardOverlay.classList.remove("open");
+  });
+
+  // ================= stack switcher =================
+  const stacksOverlay = document.getElementById("stacksOverlay");
+  const stacksPanel = document.getElementById("stacksPanel");
+  let stacksExpanded = false;
+
+  function openStacks() { stacksExpanded = false; renderStacks(); stacksOverlay.classList.add("open"); }
+  function closeStacks() { stacksOverlay.classList.remove("open"); }
+  stacksOverlay.addEventListener("click", (e) => { if (e.target === stacksOverlay) closeStacks(); });
+  document.getElementById("openStacksBtn").addEventListener("click", openStacks);
+  document.getElementById("stackInfoBtn").addEventListener("click", openStacks);
+
+  function renderStacks() {
+    const sorted = Object.keys(state.stacks)
+      .map((id) => ({ id, ...state.stacks[id] }))
+      .sort((a, b) => new Date(b.lastInteractionAt) - new Date(a.lastInteractionAt));
+
+    const visibleCount = 5;
+    const visible = sorted.slice(0, visibleCount);
+    const older = sorted.slice(visibleCount);
+
+    function rowHtml(s, rank) {
+      const fade = Math.max(0.45, 1 - rank * 0.09);
+      const isActive = s.id === state.activeStackId;
+      return `
+        <div class="stack-row ${isActive ? "active" : ""}" style="opacity:${fade.toFixed(2)}" data-stack="${s.id}">
+          <div>
+            <div class="sname">${escapeHtml(s.name)}</div>
+            <div class="spaper">Paper #${s.paperIndex}</div>
+          </div>
+          <div class="stouch">touched<br/>${relTime(s.lastInteractionAt)}</div>
+        </div>
+      `;
+    }
+
+    stacksPanel.innerHTML = `
+      <h3>Stacks</h3>
+      <div class="new-stack-row">
+        <input type="text" id="newStackName" placeholder="new stack name, e.g. Renovation" />
+        <button id="createStackBtn">Create</button>
+      </div>
+      ${visible.map((s, i) => rowHtml(s, i)).join("")}
+      ${older.length ? (
+        stacksExpanded
+          ? older.map((s, i) => rowHtml(s, visibleCount + i)).join("") + `<div class="older-toggle" id="olderToggle">▴ hide older stacks</div>`
+          : `<div class="older-toggle" id="olderToggle">▾ ${older.length} older stack(s)</div>`
+      ) : ""}
+    `;
+
+    stacksPanel.querySelectorAll(".stack-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        state.activeStackId = row.dataset.stack; // viewing/switching does NOT count as an interaction
+        state.viewingArchiveIndex = null; // always land on the new stack's current (editable) paper
+        closeStacks();
+        render();
+      });
+    });
+    const toggle = stacksPanel.querySelector("#olderToggle");
+    if (toggle) toggle.addEventListener("click", () => { stacksExpanded = !stacksExpanded; renderStacks(); });
+
+    stacksPanel.querySelector("#createStackBtn").addEventListener("click", () => {
+      const name = stacksPanel.querySelector("#newStackName").value.trim();
+      if (!name) return;
+      const id = "stack_" + (nextId++);
+      state.stacks[id] = {
+        name, paperIndex: 1,
+        paperCreatedAt: new Date().toISOString(),
+        lastInteractionAt: new Date().toISOString(),
+        themes: [], items: [],
+      };
+      state.activeStackId = id;
+      closeStacks();
+      render();
+    });
+  }
+
+  // ================= init =================
+  declutter();
+  applyTransform();
+  render();
+})();
+</script>
+</body>
+</html>

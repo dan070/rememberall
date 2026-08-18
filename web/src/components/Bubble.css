@@ -1,0 +1,142 @@
+/* Each bubble's rotation / corner radii / ink-alpha come from a hash of
+   its own id (see lib/fingerprint.ts), fixed at creation, stable forever —
+   no two look quite alike, same as a different hand-drawn circle each time. */
+.bubble {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8px 10px;
+  font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive, sans-serif;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.25s;
+  background: var(--paper);
+  color: var(--ink);
+  border-style: solid;
+}
+
+.bubble .txt {
+  position: relative;
+  z-index: 1;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  hyphens: auto;
+  line-height: 1.08;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.bubble .theme-date {
+  font-weight: 700;
+  margin-top: 3px;
+  position: relative;
+  z-index: 1;
+  font-size: 0.82em;
+}
+
+.bubble.theme {
+  font-weight: 700;
+  flex-direction: column;
+}
+
+.bubble.item {
+  font-weight: 500;
+}
+
+.bubble .date-tag {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1.5px solid var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 2px 5px;
+  z-index: 2;
+  font-family: -apple-system, sans-serif;
+}
+
+.bubble.state-done .txt {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+}
+.bubble.state-done {
+  opacity: 0.5;
+}
+.bubble.state-cancelled {
+  opacity: 0.65;
+}
+
+/* Brief confirmation for a just-created bubble — the pen-lift moment on
+   paper where your eyes are already on the spot; this just says "yes,
+   right there" without moving the camera under you. Plays once. */
+@keyframes bubble-pulse-in {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 110, 165, 0.55);
+  }
+  40% {
+    box-shadow: 0 0 0 10px rgba(59, 110, 165, 0.22);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 110, 165, 0);
+  }
+}
+.bubble.pulse-in {
+  animation: bubble-pulse-in 0.9s ease-out 1;
+}
+
+.bubble .x-mark {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.bubble .x-mark svg {
+  width: 100%;
+  height: 100%;
+}
+.bubble .x-mark line {
+  stroke: var(--ink);
+  stroke-width: 2.4;
+  stroke-opacity: 0.75;
+}
+
+/* 44px minimum touch target (the wireframe's 24px button was too small to
+   reliably tap on a phone) — the visible dot stays small via ::after so
+   the tap area doesn't visually overwhelm the bubble corner. */
+.theme-add-btn {
+  position: absolute;
+  bottom: -14px;
+  right: -14px;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  cursor: pointer;
+}
+.theme-add-btn::after {
+  content: "+";
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  font-weight: 700;
+  font-family: -apple-system, sans-serif;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.theme-add-btn:active::after {
+  transform: scale(0.9);
+}

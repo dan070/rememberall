@@ -1,0 +1,27 @@
+#readonlyBanner {
+  display: flex;
+  position: fixed;
+  top: 72px;
+  left: 0;
+  right: 0;
+  z-index: 45;
+  align-items: center;
+  justify-content: space-between;
+  background: #4a3a1f;
+  color: #f7ecd2;
+  padding: 8px calc(14px + env(safe-area-inset-right)) 8px calc(14px + env(safe-area-inset-left));
+  font-size: 12.5px;
+  gap: 10px;
+}
+#readonlyBanner button {
+  background: #f7ecd2;
+  color: #4a3a1f;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 36px;
+  flex: none;
+}

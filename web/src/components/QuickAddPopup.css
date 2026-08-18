@@ -1,0 +1,17 @@
+#quickAdd {
+  position: fixed;
+  z-index: 90;
+  background: #fffdf8;
+  border: 1px solid #ddd6c6;
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+#quickAdd input {
+  border: none;
+  outline: none;
+  font-size: 13.5px;
+  padding: 8px;
+  width: 190px;
+  font-family: -apple-system, sans-serif;
+}

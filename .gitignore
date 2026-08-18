@@ -1,0 +1,22 @@
+# Claude template repo — has its own git history, not part of this project
+.claude/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Build output
+web/dist/
+web/dist-ssr/
+
+# Editor / OS
+.DS_Store
+*.local
+
+# Env files (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# infra/ build output (added in Step 1)
+infra/cdk.out/

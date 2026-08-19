@@ -20,3 +20,8 @@ web/dist-ssr/
 
 # infra/ build output (added in Step 1)
 infra/cdk.out/
+infra/node_modules/
+infra/cdk.out/
+infra/*.d.ts
+infra/*.js
+!infra/jest.config.js

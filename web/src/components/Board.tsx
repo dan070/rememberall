@@ -45,7 +45,6 @@ export function Board({ paper, readOnly, pulseId, onOpenTheme, onOpenItem, onAdd
         onPointerMove={handlers.onPointerMove}
         onPointerUp={handlers.onPointerUp}
         onPointerCancel={handlers.onPointerUp}
-        onWheel={handlers.onWheel}
         onClick={handleCanvasClick}
       >
         <div

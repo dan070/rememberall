@@ -28,6 +28,11 @@ interface Transform {
  * didn't adapt across phone screen sizes. */
 export function usePanZoom(viewportRef: React.RefObject<HTMLDivElement | null>) {
   const [transform, setTransform] = useState<Transform>({ scale: 0.62, panX: -40, panY: -20 });
+  // Mirrors `transform` for the native (non-React) wheel listener below,
+  // which needs the current scale without going stale between renders and
+  // without re-subscribing the listener on every zoom.
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
   const [isPanning, setIsPanning] = useState(false);
   const draggedRef = useRef(false);
   const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
@@ -147,20 +152,44 @@ export function usePanZoom(viewportRef: React.RefObject<HTMLDivElement | null>) 
     }
   }, []);
 
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
+  // React's onWheel prop attaches a PASSIVE listener — preventDefault()
+  // inside it is silently ignored by the browser. That let the browser's
+  // own native page-zoom fire alongside our JS zoom on a trackpad pinch /
+  // Ctrl+scroll, scaling the entire page (including modals, which are
+  // meant to stay independent of board zoom). A native, non-passive
+  // listener is the only way preventDefault() actually suppresses it.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    function handleWheel(e: WheelEvent) {
       e.preventDefault();
       // 0.0013 — the wireframe's 0.001 rate increased 30% per feedback.
-      zoomAt(e.clientX, e.clientY, transform.scale - e.deltaY * 0.0013);
-    },
-    [transform.scale, zoomAt],
-  );
+      zoomAt(e.clientX, e.clientY, transformRef.current.scale - e.deltaY * 0.0013);
+    }
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewportRef, zoomAt]);
+
+  // Browsers also expose Ctrl+=/Ctrl+-/Ctrl+0 as page-zoom shortcuts,
+  // independent of the wheel/pinch path above — block those too so no
+  // route to native page-zoom remains open.
+  useEffect(() => {
+    function handleKeydown(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key === "+" || e.key === "-" || e.key === "=" || e.key === "0") {
+        e.preventDefault();
+      }
+    }
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, []);
 
   return {
     transform,
     isPanning,
     wasDragged: () => draggedRef.current,
-    handlers: { onPointerDown, onPointerMove, onPointerUp, onWheel },
+    handlers: { onPointerDown, onPointerMove, onPointerUp },
     zoomAtCenter,
     fitToViewport,
   };

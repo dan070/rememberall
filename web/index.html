@@ -5,8 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- viewport-fit=cover + safe-area-inset padding (see App.css) keeps the
          top bar and floating zoom controls clear of a notch or the iPhone
-         home indicator once installed full-screen. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+         home indicator once installed full-screen.
+
+         maximum-scale=1, user-scalable=no: the board has its own pinch/
+         wheel zoom (lib/usePanZoom.ts) that only scales the canvas. Without
+         this, a two-finger pinch ALSO triggers the browser's native page
+         zoom at the same time — which scales literally everything,
+         including modals that are deliberately fixed-position and meant to
+         stay independent of the board's zoom level. That's what made the
+         theme/item input boxes appear to "zoom with the board." -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Rememberall</title>
 
     <!-- iOS ignores the manifest's icons/display-mode and needs its own

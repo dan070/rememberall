@@ -20,11 +20,30 @@ body,
   padding: 0;
 }
 
+html {
+  /* iOS Safari ignores the viewport meta tag's user-scalable=no — the
+     only thing that reliably stops native pinch-zoom there is
+     touch-action:none on every element a two-finger gesture could land
+     on. Scoping this to just #viewport (the board) left the top bar,
+     modals, and any gap between bubbles unprotected: a pinch that started
+     or drifted onto one of those still triggered Safari's native
+     page-zoom. Once that fires, iOS has a long-standing bug where
+     position:fixed elements (our top bar/modals/zoom buttons) desync from
+     the visual viewport — they stop tracking scroll/zoom and can render
+     as a static, mispositioned block filling the screen. That's the
+     "off-white wall, reload fixes it" symptom: it's the browser's own
+     zoom state that broke, which our JS has no way to repair — only a
+     reload resets it. Blocking the gesture everywhere, not just on the
+     board, is what actually prevents it from ever firing. */
+  touch-action: none;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: var(--ink);
   overflow: hidden;
   background: #d8d2c3;
+  touch-action: none;
   /* Pull-to-refresh / rubber-band scroll on iOS Safari could otherwise
      fight the board's own pan gesture outside the canvas (top bar,
      modals) — the canvas itself also sets this via #viewport. */
@@ -34,4 +53,13 @@ body {
 .app {
   position: fixed;
   inset: 0;
+  touch-action: none;
+}
+
+/* Modal content (notes list, date picker, etc.) still needs to scroll
+   normally with one finger — carve out the exception on the scrollable
+   panel itself, not the page. pan-y allows vertical single-finger scroll
+   but still blocks pinch-zoom starting from inside a modal. */
+.modal-panel {
+  touch-action: pan-y;
 }

@@ -52,7 +52,11 @@ describe("declutter", () => {
   });
 
   it("keeps every item within its own theme's exclusion zone plus any others declutter had to satisfy", () => {
-    const themes = [makeTheme("t1", 500, 500), makeTheme("t2", 510, 500)];
+    // t2's y is offset (not exactly 500) so the two themes' separation axis
+    // is unambiguous — an exact dy===0 tie would let the solver's random
+    // tie-break occasionally push t1 toward the item instead of away from
+    // it, making this assertion flaky depending on that internal coin flip.
+    const themes = [makeTheme("t1", 500, 500), makeTheme("t2", 510, 520)];
     const items = [makeItem("i1", "t1", 500, 350)];
     declutter(themes, items);
 

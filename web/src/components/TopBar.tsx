@@ -6,13 +6,14 @@ interface TopBarProps {
   stackName: string;
   paper: CurrentPaper;
   readOnly: boolean;
+  isMobile: boolean;
   onOpenStacks: () => void;
   onOpenPapers: () => void;
   onRearrange: () => void;
   onNewPaper: () => void;
 }
 
-export function TopBar({ stackName, paper, readOnly, onOpenStacks, onOpenPapers, onRearrange, onNewPaper }: TopBarProps) {
+export function TopBar({ stackName, paper, readOnly, isMobile, onOpenStacks, onOpenPapers, onRearrange, onNewPaper }: TopBarProps) {
   return (
     <div id="topbar">
       <div className="stackinfo" onClick={onOpenStacks}>
@@ -22,7 +23,9 @@ export function TopBar({ stackName, paper, readOnly, onOpenStacks, onOpenPapers,
       <div className="btns">
         <button onClick={onOpenStacks}>Stacks ▾</button>
         <button onClick={onOpenPapers}>Papers ▾</button>
-        {!readOnly && (
+        {/* Rearrange nudges overlapping canvas bubbles apart — meaningless
+            once there's no canvas, so it's board-only. */}
+        {!readOnly && !isMobile && (
           <button onClick={onRearrange} title="Nudge overlapping bubbles apart">
             Rearrange ⤨
           </button>

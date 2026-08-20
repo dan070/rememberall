@@ -1,0 +1,37 @@
+.sync-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #8f8672;
+}
+.sync-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6b7d5e;
+  flex: none;
+}
+.sync-status--syncing .sync-dot {
+  background: #c9a24a;
+  animation: sync-pulse 1s ease-in-out infinite;
+}
+.sync-status--error .sync-dot,
+.sync-status--no-token .sync-dot {
+  background: #b85c5c;
+}
+.sync-status--error,
+.sync-status--no-token {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+@keyframes sync-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}

@@ -8,13 +8,14 @@ interface StacksPanelProps {
   activeStackId: string;
   onSelect: (stackId: string) => void;
   onCreate: (name: string) => void;
+  onResetLocalData: () => void;
 }
 
 /** Lists stacks sorted by lastInteractionAt (adding/changing something —
  * never just viewing), fading progressively; anything past the top 5
  * collapses behind an "older stacks" toggle so a long-neglected stack
  * naturally drops out of sight without being deleted. */
-export function StacksPanel({ stacks, activeStackId, onSelect, onCreate }: StacksPanelProps) {
+export function StacksPanel({ stacks, activeStackId, onSelect, onCreate, onResetLocalData }: StacksPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [newName, setNewName] = useState("");
 
@@ -68,6 +69,20 @@ export function StacksPanel({ stacks, activeStackId, onSelect, onCreate }: Stack
           {expanded ? "▴ hide older stacks" : `▾ ${older.length} older stack(s)`}
         </div>
       )}
+      <div
+        className="reset-local-data"
+        onClick={() => {
+          const ok = window.confirm(
+            "Reset local data on this device?\n\n" +
+              "This clears everything stored locally (stacks, outbox, sync cursor) and reloads. " +
+              "Nothing on the server is touched — a fresh sync repopulates from there.\n\n" +
+              "Only do this if the local copy on this device seems stuck or wrong.",
+          );
+          if (ok) onResetLocalData();
+        }}
+      >
+        Reset local data on this device
+      </div>
     </>
   );
 }

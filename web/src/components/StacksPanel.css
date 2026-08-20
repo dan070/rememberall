@@ -56,3 +56,13 @@
   cursor: pointer;
   text-decoration: underline;
 }
+.reset-local-data {
+  text-align: center;
+  font-size: 11.5px;
+  color: #b85c5c;
+  padding: 14px 0 2px;
+  margin-top: 8px;
+  border-top: 1px solid #ece6d7;
+  cursor: pointer;
+  text-decoration: underline;
+}

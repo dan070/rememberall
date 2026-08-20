@@ -79,3 +79,15 @@ export async function getAllOps(): Promise<OutboxOp[]> {
   const db = await getDb();
   return db.getAll(OUTBOX_STORE);
 }
+
+// --- full reset ---
+
+/** Wipes every local store (stacks, meta, outbox) — used by the "Reset
+ * local data" action to recover from a device whose local mirror is stuck
+ * or suspected stale, without needing dev-tools access to clear site
+ * data manually. Does not touch the server; a fresh sync afterwards
+ * repopulates from there. */
+export async function clearAllLocalData(): Promise<void> {
+  const db = await getDb();
+  await Promise.all([db.clear(STACKS_STORE), db.clear(META_STORE), db.clear(OUTBOX_STORE)]);
+}

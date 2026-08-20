@@ -14,7 +14,7 @@ import { ThemeCard } from "./components/ThemeCard";
 import { ThemeSwitchDialog } from "./components/ThemeSwitchDialog";
 import { TopBar } from "./components/TopBar";
 import { API_URL } from "./lib/config";
-import { enqueueOp, getAllStacks, getMeta, putStacks, setMeta } from "./lib/db";
+import { clearAllLocalData, enqueueOp, getAllStacks, getMeta, putStacks, setMeta } from "./lib/db";
 import { makePutStackOp } from "./lib/outbox";
 import { useIsMobile } from "./lib/useIsMobile";
 import { activePaper, activeStack, isReadOnly, reducer, type AppState } from "./lib/reducer";
@@ -46,6 +46,13 @@ function App() {
   const pulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMobile = useIsMobile();
   const tokenRef = useRef<string | undefined>(undefined);
+  // Visible sync state — the earlier version of this failed completely
+  // silently (a misconfigured gate meant sync() always returned before
+  // attempting a request, in exactly the deployed environment where it
+  // needed to run), with nothing in the UI to say so. This is what makes
+  // that class of failure visible without reading Lambda logs.
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "error" | "no-token">("idle");
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   // Tracks which Stack object each stack id last pointed to, so an outbox
   // op is enqueued only for stacks whose reference actually changed since
   // the previous render — reducer.ts's withStack() always returns a new
@@ -62,7 +69,19 @@ function App() {
 
   const sync = useCallback(async () => {
     const token = tokenRef.current;
-    if (!token || !API_URL) return;
+    // Gated on the token alone, NOT on API_URL — API_URL is "" in
+    // production on purpose (same-origin relative /api/... paths through
+    // CloudFront; see lib/config.ts), so `!API_URL` was true in exactly
+    // the deployed environment where sync was supposed to run. That bug
+    // meant sync() always returned before ever attempting a request —
+    // completely silently, with no error, no failed fetch, nothing to see
+    // in a network tab. See setSyncStatus below for the visible indicator
+    // that should make this class of failure obvious next time.
+    if (!token) {
+      setSyncStatus("no-token");
+      return;
+    }
+    setSyncStatus("syncing");
     try {
       await runSync(API_URL, token);
       const stacks = await getAllStacks();
@@ -71,11 +90,14 @@ function App() {
       // doc comment for why restating activeStackId/viewingArchiveIndex
       // from a closure here would go stale.
       dispatch({ type: "mergeStacksFromSync", stacks });
+      setSyncStatus("idle");
+      setLastSyncedAt(Date.now());
     } catch (err) {
       // Sync failures are expected offline — the outbox/cursor persist
       // locally and retry on the next trigger. Never surface this as a
       // blocking error; the local write already succeeded.
       console.error("sync failed", err);
+      setSyncStatus("error");
     }
   }, []);
 
@@ -91,7 +113,7 @@ function App() {
       let stacks = await getAllStacks();
 
       let token = await getAuthToken();
-      if (!token && API_URL) {
+      if (!token) {
         const entered = window.prompt("Enter your access token:");
         if (entered) {
           await setAuthToken(entered);
@@ -100,7 +122,7 @@ function App() {
       }
       tokenRef.current = token;
 
-      if (stacks.length === 0 && token && API_URL) {
+      if (stacks.length === 0 && token) {
         try {
           const pulled = await pullSync(API_URL, token);
           if (pulled.length > 0) stacks = await getAllStacks();
@@ -199,6 +221,16 @@ function App() {
     setModal({ kind: "none" });
   }
 
+  async function retrySync() {
+    if (!tokenRef.current) {
+      const entered = window.prompt("Enter your access token:");
+      if (!entered) return;
+      await setAuthToken(entered);
+      tokenRef.current = entered;
+    }
+    void sync();
+  }
+
   return (
     <div className="app">
       <TopBar
@@ -206,9 +238,12 @@ function App() {
         paper={paper}
         readOnly={readOnly}
         isMobile={isMobile}
+        syncStatus={syncStatus}
+        lastSyncedAt={lastSyncedAt}
         onOpenStacks={() => setModal({ kind: "stacks" })}
         onOpenPapers={() => setModal({ kind: "papers" })}
         onRearrange={() => dispatch({ type: "rearrange" })}
+        onRetrySync={() => void retrySync()}
         onNewPaper={() => {
           const summary = summarizeRetirement(stack.currentPaper);
           const ok = window.confirm(
@@ -360,6 +395,9 @@ function App() {
           onCreate={(name) => {
             dispatch({ type: "createStack", id: ulid(), name });
             closeModal();
+          }}
+          onResetLocalData={() => {
+            void clearAllLocalData().then(() => window.location.reload());
           }}
         />
       </Modal>

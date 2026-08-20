@@ -1,5 +1,6 @@
 import { fmtDateTimeLong } from "../lib/date";
 import type { CurrentPaper } from "../lib/types";
+import { SyncStatus, type SyncState } from "./SyncStatus";
 import "./TopBar.css";
 
 interface TopBarProps {
@@ -7,13 +8,28 @@ interface TopBarProps {
   paper: CurrentPaper;
   readOnly: boolean;
   isMobile: boolean;
+  syncStatus: SyncState;
+  lastSyncedAt: number | null;
   onOpenStacks: () => void;
   onOpenPapers: () => void;
   onRearrange: () => void;
   onNewPaper: () => void;
+  onRetrySync: () => void;
 }
 
-export function TopBar({ stackName, paper, readOnly, isMobile, onOpenStacks, onOpenPapers, onRearrange, onNewPaper }: TopBarProps) {
+export function TopBar({
+  stackName,
+  paper,
+  readOnly,
+  isMobile,
+  syncStatus,
+  lastSyncedAt,
+  onOpenStacks,
+  onOpenPapers,
+  onRearrange,
+  onNewPaper,
+  onRetrySync,
+}: TopBarProps) {
   return (
     <div id="topbar">
       <div className="stackinfo" onClick={onOpenStacks}>
@@ -33,7 +49,8 @@ export function TopBar({ stackName, paper, readOnly, isMobile, onOpenStacks, onO
         {!readOnly && <button onClick={onNewPaper}>New paper →</button>}
       </div>
       <div className="meta">
-        {readOnly ? `archived — ${fmtDateTimeLong(paper.createdAt)}` : `started ${fmtDateTimeLong(paper.createdAt)}`}
+        <span>{readOnly ? `archived — ${fmtDateTimeLong(paper.createdAt)}` : `started ${fmtDateTimeLong(paper.createdAt)}`}</span>
+        <SyncStatus status={syncStatus} lastSyncedAt={lastSyncedAt} onRetry={onRetrySync} />
       </div>
     </div>
   );

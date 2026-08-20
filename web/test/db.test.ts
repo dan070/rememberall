@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deleteOp, enqueueOp, getAllOps, getAllStacks, getMeta, putOp, putStack, putStacks, setMeta } from "../src/lib/db";
+import { clearAllLocalData, deleteOp, enqueueOp, getAllOps, getAllStacks, getMeta, putOp, putStack, putStacks, setMeta } from "../src/lib/db";
 import { makePutStackOp } from "../src/lib/outbox";
 import type { Stack } from "../src/lib/types";
 
@@ -64,6 +64,20 @@ describe("outbox store", () => {
     await deleteOp("outbox-op-3");
     const all = await getAllOps();
     expect(all.find((o) => o.opId === "outbox-op-3")).toBeUndefined();
+  });
+});
+
+describe("clearAllLocalData", () => {
+  it("wipes stacks, outbox, and meta entirely", async () => {
+    await putStack(makeStack("reset-test-1", "Before Reset"));
+    await enqueueOp(makePutStackOp(makeStack("reset-test-1", "Before Reset"), "reset-op-1", 1000));
+    await setMeta("activeStackId", "reset-test-1");
+
+    await clearAllLocalData();
+
+    expect(await getAllStacks()).toEqual([]);
+    expect(await getAllOps()).toEqual([]);
+    expect(await getMeta("activeStackId")).toBeUndefined();
   });
 });
 

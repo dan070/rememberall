@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ulid } from "ulid";
 import { Board } from "./components/Board";
 import { ItemCard } from "./components/ItemCard";
@@ -13,12 +13,17 @@ import { StacksPanel } from "./components/StacksPanel";
 import { ThemeCard } from "./components/ThemeCard";
 import { ThemeSwitchDialog } from "./components/ThemeSwitchDialog";
 import { TopBar } from "./components/TopBar";
-import { getAllStacks, getMeta, putStacks, setMeta } from "./lib/db";
+import { API_URL } from "./lib/config";
+import { enqueueOp, getAllStacks, getMeta, putStacks, setMeta } from "./lib/db";
+import { makePutStackOp } from "./lib/outbox";
 import { useIsMobile } from "./lib/useIsMobile";
 import { activePaper, activeStack, isReadOnly, reducer, type AppState } from "./lib/reducer";
 import { seedStacks } from "./lib/seed";
 import { summarizeRetirement } from "./lib/paper";
+import { getAuthToken, pullSync, runSync, setAuthToken } from "./lib/sync";
 import "./App.css";
+
+const SYNC_INTERVAL_MS = 15_000;
 
 type ModalState =
   | { kind: "none" }
@@ -40,30 +45,143 @@ function App() {
   const [pulseId, setPulseId] = useState<string | null>(null);
   const pulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMobile = useIsMobile();
+  const tokenRef = useRef<string | undefined>(undefined);
+  // Tracks which Stack object each stack id last pointed to, so an outbox
+  // op is enqueued only for stacks whose reference actually changed since
+  // the previous render — reducer.ts's withStack() always returns a new
+  // object for a touched stack (and only that stack), so identity is a
+  // reliable, cheap "did this change" signal without diffing every field.
+  const lastStackRefs = useRef<Map<string, object>>(new Map());
+  // hydrate (initial load AND every post-sync pull) replaces the whole
+  // stacks array wholesale, which would otherwise look identical to "every
+  // stack just got edited" to the ref-diff below — re-enqueueing an outbox
+  // op for every stack and re-triggering sync after every sync completes,
+  // looping forever. Set right before any hydrate dispatch; the persist
+  // effect below consumes and clears it.
+  const suppressNextDiffRef = useRef(false);
 
-  // Initial load: read persisted stacks, or seed on first run.
+  const sync = useCallback(async () => {
+    const token = tokenRef.current;
+    if (!token || !API_URL) return;
+    try {
+      await runSync(API_URL, token);
+      const stacks = await getAllStacks();
+      suppressNextDiffRef.current = true;
+      // Deliberately not "hydrate" — see reducer.ts's mergeStacksFromSync
+      // doc comment for why restating activeStackId/viewingArchiveIndex
+      // from a closure here would go stale.
+      dispatch({ type: "mergeStacksFromSync", stacks });
+    } catch (err) {
+      // Sync failures are expected offline — the outbox/cursor persist
+      // locally and retry on the next trigger. Never surface this as a
+      // blocking error; the local write already succeeded.
+      console.error("sync failed", err);
+    }
+  }, []);
+
+  // Initial load: read persisted stacks. Resolve the token and try a
+  // server pull BEFORE ever seeding — a brand-new device (empty local
+  // IndexedDB) otherwise can't tell "first run, nothing exists anywhere"
+  // apart from "this device just hasn't synced yet, and the server
+  // already has real data" — seeding blindly in the second case creates
+  // fake local stacks whose outbox writes can then race the pull and
+  // overwrite whatever the server actually had.
   useEffect(() => {
     (async () => {
-      const stacks = await getAllStacks();
+      let stacks = await getAllStacks();
+
+      let token = await getAuthToken();
+      if (!token && API_URL) {
+        const entered = window.prompt("Enter your access token:");
+        if (entered) {
+          await setAuthToken(entered);
+          token = entered;
+        }
+      }
+      tokenRef.current = token;
+
+      if (stacks.length === 0 && token && API_URL) {
+        try {
+          const pulled = await pullSync(API_URL, token);
+          if (pulled.length > 0) stacks = await getAllStacks();
+        } catch (err) {
+          console.error("initial pull failed", err);
+        }
+      }
+
+      suppressNextDiffRef.current = true;
       if (stacks.length > 0) {
         const activeStackId = (await getMeta<string>("activeStackId")) ?? stacks[0].id;
         dispatch({ type: "hydrate", stacks, activeStackId, viewingArchiveIndex: null });
       } else {
-        const seeded = seedStacks();
-        await putStacks(seeded);
-        dispatch({ type: "hydrate", stacks: seeded, activeStackId: seeded[0].id, viewingArchiveIndex: null });
+        // Genuinely nothing anywhere (server included, or unreachable/no
+        // token) — this is the actual first-run case.
+        stacks = seedStacks();
+        await putStacks(stacks);
+        dispatch({ type: "hydrate", stacks, activeStackId: stacks[0].id, viewingArchiveIndex: null });
       }
       setLoaded(true);
+
+      // Backfill: any stack with no `updatedAt` has never reached the
+      // server (it predates this sync code, was just seeded, or was
+      // created offline before a token existed). The reference-diff in
+      // the persist effect below only fires on a NEW edit, so without
+      // this, pre-existing local data would sit invisible to sync forever
+      // unless the user happened to touch it again.
+      for (const s of stacks.filter((s) => s.updatedAt === undefined)) {
+        await enqueueOp(makePutStackOp(s, ulid(), Date.now()));
+      }
+
+      void sync();
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fires while the tab is open, on regaining connectivity, and on
+  // becoming visible again — iOS Safari has no Background Sync API, so
+  // the outbox flush has to be driven by the page itself.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") void sync();
+    }
+    function onOnline() {
+      void sync();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
+    const interval = window.setInterval(() => void sync(), SYNC_INTERVAL_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onOnline);
+      window.clearInterval(interval);
+    };
+  }, [sync]);
+
   // Persist on every change, once initial hydration has happened — avoids
-  // an initial empty-state write racing the load above.
+  // an initial empty-state write racing the load above. Also enqueues an
+  // outbox op for any stack whose object reference changed since the last
+  // render (a real local edit), then kicks a sync — mirrors the local-
+  // write-first, sync-after pattern the rest of the app already uses.
   useEffect(() => {
     if (!loaded) return;
     void putStacks(state.stacks);
     void setMeta("activeStackId", state.activeStackId);
-  }, [loaded, state.stacks, state.activeStackId]);
+
+    const suppressed = suppressNextDiffRef.current;
+    suppressNextDiffRef.current = false;
+
+    let changed = false;
+    if (!suppressed) {
+      for (const stack of state.stacks) {
+        if (lastStackRefs.current.get(stack.id) !== stack) {
+          changed = true;
+          void enqueueOp(makePutStackOp(stack, ulid(), Date.now()));
+        }
+      }
+    }
+    lastStackRefs.current = new Map(state.stacks.map((s) => [s.id, s]));
+    if (changed) void sync();
+  }, [loaded, state.stacks, state.activeStackId, sync]);
 
   if (!loaded) return null;
 

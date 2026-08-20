@@ -11,6 +11,7 @@ export interface AppState {
 
 export type Action =
   | { type: "hydrate"; stacks: Stack[]; activeStackId: string; viewingArchiveIndex: number | null }
+  | { type: "mergeStacksFromSync"; stacks: Stack[] }
   | { type: "setActiveStack"; stackId: string }
   | { type: "setViewingArchiveIndex"; index: number | null }
   | { type: "createTheme"; id: string; text: string; x: number; y: number }
@@ -52,6 +53,19 @@ export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate":
       return { stacks: action.stacks, activeStackId: action.activeStackId, viewingArchiveIndex: action.viewingArchiveIndex };
+
+    // A sync pull only ever needs to update `stacks` — it must never touch
+    // activeStackId/viewingArchiveIndex, both pure UI-selection state with
+    // no server counterpart. Reusing "hydrate" for this (as an earlier
+    // version did) meant the dispatch had to restate the current
+    // selection from `state`, and a sync fired from a callback whose
+    // closure predates a state change would restate a STALE selection —
+    // e.g. resetting activeStackId back to "" after sync completed inside
+    // the initial-load effect, which only ever runs once and so never sees
+    // any state update made after it started. This action sidesteps the
+    // whole class of bug by not depending on the current state at all.
+    case "mergeStacksFromSync":
+      return { ...state, stacks: action.stacks };
 
     case "setActiveStack":
       // Always land on the new stack's current (editable) paper.

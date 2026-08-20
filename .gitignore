@@ -25,3 +25,6 @@ infra/cdk.out/
 infra/*.d.ts
 infra/*.js
 !infra/jest.config.js
+api/node_modules/
+api/dist/
+web/.env.local

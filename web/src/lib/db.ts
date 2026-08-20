@@ -1,10 +1,12 @@
 import { openDB, type IDBPDatabase } from "idb";
+import type { OutboxOp } from "./outbox";
 import type { Stack } from "./types";
 
 const DB_NAME = "rememberall";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STACKS_STORE = "stacks";
 const META_STORE = "meta";
+const OUTBOX_STORE = "outbox";
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -15,6 +17,9 @@ function getDb() {
         if (oldVersion < 1) {
           db.createObjectStore(STACKS_STORE, { keyPath: "id" });
           db.createObjectStore(META_STORE); // keyPath-less: get/put by explicit key
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore(OUTBOX_STORE, { keyPath: "opId" });
         }
       },
     });
@@ -51,4 +56,26 @@ export async function getMeta<T>(key: string): Promise<T | undefined> {
 export async function setMeta(key: string, value: unknown): Promise<void> {
   const db = await getDb();
   await db.put(META_STORE, value, key);
+}
+
+// --- outbox ---
+
+export async function enqueueOp(op: OutboxOp): Promise<void> {
+  const db = await getDb();
+  await db.put(OUTBOX_STORE, op);
+}
+
+export async function putOp(op: OutboxOp): Promise<void> {
+  const db = await getDb();
+  await db.put(OUTBOX_STORE, op);
+}
+
+export async function deleteOp(opId: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(OUTBOX_STORE, opId);
+}
+
+export async function getAllOps(): Promise<OutboxOp[]> {
+  const db = await getDb();
+  return db.getAll(OUTBOX_STORE);
 }

@@ -58,4 +58,8 @@ export interface Stack {
   lastInteractionAt: string;
   currentPaper: CurrentPaper;
   archive: ArchivedPaper[];
+  /** Server-assigned once synced (drives last-write-wins merge). Whole
+   * stacks sync as one blob — see api/src/types.ts's Stack doc comment for
+   * why item-level sync isn't what Step 2 does. */
+  updatedAt?: number;
 }

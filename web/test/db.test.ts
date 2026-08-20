@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getAllStacks, getMeta, putStack, putStacks, setMeta } from "../src/lib/db";
+import { deleteOp, enqueueOp, getAllOps, getAllStacks, getMeta, putOp, putStack, putStacks, setMeta } from "../src/lib/db";
+import { makePutStackOp } from "../src/lib/outbox";
 import type { Stack } from "../src/lib/types";
 
 function makeStack(id: string, name: string): Stack {
@@ -36,6 +37,33 @@ describe("stacks store", () => {
     await putStack({ ...stack, name: "Renamed" });
     const all = await getAllStacks();
     expect(all.find((s) => s.id === "db-test-overwrite")?.name).toBe("Renamed");
+  });
+});
+
+describe("outbox store", () => {
+  it("enqueues and lists an op", async () => {
+    const op = makePutStackOp(makeStack("outbox-test-1", "Outbox 1"), "outbox-op-1", 1000);
+    await enqueueOp(op);
+    const all = await getAllOps();
+    expect(all.find((o) => o.opId === "outbox-op-1")).toEqual(op);
+  });
+
+  it("putOp overwrites an existing op by opId", async () => {
+    const op = makePutStackOp(makeStack("outbox-test-2", "Outbox 2"), "outbox-op-2", 1000);
+    await enqueueOp(op);
+    await putOp({ ...op, attempts: 3, nextAttemptAt: 9999 });
+    const all = await getAllOps();
+    const found = all.find((o) => o.opId === "outbox-op-2");
+    expect(found?.attempts).toBe(3);
+    expect(found?.nextAttemptAt).toBe(9999);
+  });
+
+  it("deleteOp removes it — this is how a successful send clears the queue", async () => {
+    const op = makePutStackOp(makeStack("outbox-test-3", "Outbox 3"), "outbox-op-3", 1000);
+    await enqueueOp(op);
+    await deleteOp("outbox-op-3");
+    const all = await getAllOps();
+    expect(all.find((o) => o.opId === "outbox-op-3")).toBeUndefined();
   });
 });
 

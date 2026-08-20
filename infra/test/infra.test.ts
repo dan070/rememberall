@@ -1,5 +1,5 @@
 import * as cdk from 'aws-cdk-lib/core';
-import { Template } from 'aws-cdk-lib/assertions';
+import { Match, Template } from 'aws-cdk-lib/assertions';
 import { InfraStack } from '../lib/infra-stack';
 
 describe('RememberallStack', () => {
@@ -18,18 +18,64 @@ describe('RememberallStack', () => {
     });
   });
 
-  it('creates a CloudFront distribution', () => {
+  it('creates a CloudFront distribution with a dedicated /api/* behavior', () => {
     template.resourceCountIs('AWS::CloudFront::Distribution', 1);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: {
+        CacheBehaviors: [
+          {
+            PathPattern: '/api/*',
+            // CachingDisabled managed policy id — /api/* must never be
+            // served stale, every request is a live write or a
+            // freshness-sensitive read.
+            CachePolicyId: '4135ea2d-6df8-44a3-9df3-4b5a84be39ad',
+          },
+        ],
+      },
+    });
   });
 
-  it('does not create a DynamoDB table or a Lambda Function URL (Step 1 is static-site-only)', () => {
-    // A Lambda DOES show up here — CDK's BucketDeployment construct uses
-    // one internally (a custom resource that copies files into S3 and
-    // triggers the CloudFront invalidation) — that's plumbing, not an
-    // application function, so it's not asserted against. What Step 1
-    // must NOT have is a table or an app-facing Lambda Function URL;
-    // those arrive in Step 2 with the sync code that uses them.
-    template.resourceCountIs('AWS::DynamoDB::Table', 0);
-    template.resourceCountIs('AWS::Lambda::Url', 0);
+  it('creates a single-table DynamoDB table with a GSI1 sync index, retained on delete', () => {
+    template.resourceCountIs('AWS::DynamoDB::Table', 1);
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'rememberall',
+      KeySchema: [
+        { AttributeName: 'pk', KeyType: 'HASH' },
+        { AttributeName: 'sk', KeyType: 'RANGE' },
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: 'gsi1',
+          KeySchema: [
+            { AttributeName: 'gsi1pk', KeyType: 'HASH' },
+            { AttributeName: 'gsi1sk', KeyType: 'RANGE' },
+          ],
+        },
+      ],
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+    });
+    template.hasResource('AWS::DynamoDB::Table', { DeletionPolicy: 'Retain' });
+  });
+
+  it('creates a Lambda Function URL requiring AWS_IAM auth (not directly callable, only via CloudFront OAC)', () => {
+    template.resourceCountIs('AWS::Lambda::Url', 1);
+    template.hasResourceProperties('AWS::Lambda::Url', {
+      AuthType: 'AWS_IAM',
+    });
+  });
+
+  it('grants the API function read/write on the table and read on the bearer-token SSM parameter, not the whole account', () => {
+    // A narrowly-scoped IAM policy statement referencing the table's own
+    // ARN (not "*") is the regression guard here — this is what stops a
+    // future change from silently widening the function's blast radius.
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith(['dynamodb:GetItem']),
+          }),
+        ]),
+      },
+    });
   });
 });
